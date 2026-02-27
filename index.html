@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Space Bulls Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #eef4ff;
+      color: #111;
+    }
+    .topbar {
+      background: #1e5eff;
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: bold;
+      font-size: 26px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+    }
+    .topbar small {
+      font-size: 15px;
+      font-weight: normal;
+      color: #dce8ff;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+      padding: 18px;
+    }
+    .card {
+      background: #f8fbff;
+      border-radius: 18px;
+      padding: 14px;
+      min-height: 260px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+      border: 3px solid #1e5eff;
+      position: relative;
+    }
+    .card-title {
+      background: #1e5eff;
+      color: #fff;
+      border-radius: 14px;
+      text-align: center;
+      font-size: 18px;
+      font-weight: bold;
+      padding: 8px 10px;
+      margin: -6px -6px 14px -6px;
+    }
+    .centerBox {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 200px;
+      flex-direction: column;
+    }
+    .gaugeWrap {
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: conic-gradient(#1e5eff 0deg, #1e5eff 0deg, #111 0deg 360deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: auto;
+      transition: 0.4s ease;
+    }
+    .gaugeInner {
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 54px;
+      font-weight: bold;
+    }
+    .stats {
+      padding: 18px 20px;
+      font-size: 18px;
+      line-height: 1.7;
+    }
+    .mini {
+      font-size: 16px;
+      color: #333;
+      margin-top: 8px;
+    }
+    .statusPill {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+    .ok { background: #d8ffd8; color: #116611; }
+    .warn { background: #fff0cc; color: #8a5a00; }
+    .bad { background: #ffd9d9; color: #8d0000; }
+
+    canvas {
+      width: 100% !important;
+      height: 190px !important;
+    }
+
+    .cameraBox {
+      width: 100%;
+      height: 220px;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #000;
+      border: 2px solid #d6e4ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .cameraBox img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: #000;
+    }
+
+    .footer-note {
+      text-align: center;
+      padding: 0 18px 18px;
+      color: #2d4d99;
+      font-size: 14px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="topbar">
+    <div>Space Bulls Dashboard</div>
+    <small id="wifiInfo">Connecting...</small>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Hydrogen / Gas Conc.</div>
+      <canvas id="mq2Chart"></canvas>
+      <div class="mini">MQ-2 analog level: <b id="mq2Value">--</b></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Combustible Gases</div>
+      <div class="centerBox">
+        <div class="gaugeWrap" id="gasGauge">
+          <div class="gaugeInner"><span id="gasPercent">0%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">CO₂ Air Quality</div>
+      <canvas id="co2Chart"></canvas>
+      <div class="mini">SCD41 CO₂: <b id="co2Value">--</b> ppm</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Environment</div>
+      <div class="stats">
+        Temperature (DHT): <b id="dhtTemp">--</b> °C<br>
+        Humidity (DHT): <b id="dhtHum">--</b> %<br>
+        SCD Temp: <b id="scdTemp">--</b> °C<br>
+        SCD Humidity: <b id="scdHum">--</b> %<br>
+        MQ-2 Digital: <b id="mq2Digital">--</b><br>
+        <span id="gasStatus" class="statusPill warn">Waiting...</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Soil Moisture</div>
+      <div class="centerBox">
+        <div class="gaugeWrap" id="soilGauge">
+          <div class="gaugeInner"><span id="soilPercent">50%</span></div>
+        </div>
+      </div>
+      <div class="mini">Demo random values until sensor is added.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Soil Temperature</div>
+      <canvas id="soilTempChart"></canvas>
+      <div class="mini">DS18B20: <b id="soilTempValue">--</b> °C</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">pH Level</div>
+      <div class="centerBox">
+        <div style="font-size:72px;font-weight:bold;" id="phValue">7.0</div>
+        <div class="mini">Placeholder until pH sensor is added.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Spectrometer Analysis</div>
+      <div class="stats">
+        Wavelength: <b>600 nm</b><br>
+        Absorbance: <b>0.85</b><br>
+        Transmittance: <b>45%</b><br>
+        Reflectance Intensity: <b>120</b><br>
+        <div class="mini" style="margin-top:10px;">Placeholder card for future sensor/module.</div>
+      </div>
+    </div>
+
+    <!-- Rover camera feed (ESP32/STM32) -->
+    <div class="card">
+      <div class="card-title">ESP32-CAM Live Feed</div>
+      <div class="cameraBox">
+        <img id="cameraFeed" alt="ESP32-CAM Live Feed" />
+      </div>
+      <div class="mini">
+        Stream: <b id="camStatus">Connecting...</b>
+      </div>
+    </div>
+
+    <!-- Soil AI webcam preview (Laptop) -->
+    <div class="card">
+      <div class="card-title">Soil Prediction</div>
+      <div class="cameraBox">
+        <img id="soilCam" alt="Soil AI Camera" />
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    Live data updates every 3 seconds from Arduino UNO R4 WiFi
+  </div>
+
+  <script>
+    // ====== YOUR URLs ======
+    const ARDUINO_URL = "http://192.168.137.172/data";       // base sensor JSON
+    const ESP32_CAM_STREAM = "http://192.168.137.50/stream"; // rover cam
+    const SOIL_URL = "http://127.0.0.1:8002/soil";           // soil JSON
+    const SOIL_FRAME_URL = "http://127.0.0.1:8002/frame.jpg";// soil webcam jpeg
+    
+
+    // ====== Charts storage ======
+    const mq2Labels = [];
+    const mq2Data = [];
+    const co2Labels = [];
+    const co2Data = [];
+    const soilTempPoints = [];
+
+    function makeLineChart(id, label, borderColor, bgColor, yMin = null, yMax = null) {
+      return new Chart(document.getElementById(id), {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: label,
+            data: [],
+            borderColor: borderColor,
+            backgroundColor: bgColor,
+            fill: true,
+            tension: 0.25,
+            pointRadius: 2
+          }]
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { min: yMin, max: yMax } }
+        }
+      });
+    }
+
+    function makeScatterLineChart(id, label, borderColor, bgColor, yMin = null, yMax = null) {
+      return new Chart(document.getElementById(id), {
+        type: 'scatter',
+        data: {
+          datasets: [{
+            label: label,
+            data: [],
+            showLine: true,
+            borderColor: borderColor,
+            backgroundColor: bgColor,
+            tension: 0.25,
+            pointRadius: 5,
+            borderWidth: 3
+          }]
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { type: 'linear', ticks: { stepSize: 1 } },
+            y: { min: yMin, max: yMax }
+          }
+        }
+      });
+    }
+
+    const mq2Chart = makeLineChart('mq2Chart', 'Gas Level', '#1e5eff', 'rgba(30,94,255,0.15)', 0, 1023);
+    const co2Chart = makeLineChart('co2Chart', 'CO₂ (ppm)', '#1e5eff', 'rgba(30,94,255,0.15)', 0, 5000);
+    const soilTempChart = makeScatterLineChart('soilTempChart', 'Soil Temp (°C)', '#1e5eff', '#1e5eff', 20, 30);
+
+    function updateGauge(elId, valuePercent) {
+      const angle = Math.round((valuePercent / 100) * 360);
+      const el = document.getElementById(elId);
+      el.style.background = `conic-gradient(#1e5eff 0deg ${angle}deg, #111 ${angle}deg 360deg)`;
+    }
+
+    function pushData(chart, labelsArr, dataArr, label, value, maxLen = 12) {
+      labelsArr.push(label);
+      dataArr.push(value);
+      if (labelsArr.length > maxLen) labelsArr.shift();
+      if (dataArr.length > maxLen) dataArr.shift();
+      chart.data.labels = labelsArr;
+      chart.data.datasets[0].data = dataArr;
+      chart.update();
+    }
+
+    function pushScatterPoint(chart, pointsArr, x, y, maxLen = 12) {
+      pointsArr.push({ x, y });
+      if (pointsArr.length > maxLen) pointsArr.shift();
+      chart.data.datasets[0].data = pointsArr;
+      chart.update();
+    }
+
+    // ====== Rover camera (ESP32) ======
+    let activeCamUrl = "";
+    function setRoverCamera(url) {
+      const img = document.getElementById('cameraFeed');
+      const status = document.getElementById('camStatus');
+      if (!url) return;
+
+      if (activeCamUrl !== url) {
+        activeCamUrl = url;
+        img.src = url;
+      }
+
+      img.onerror = () => status.textContent = 'Camera not reachable';
+      img.onload = () => status.textContent = 'Live';
+    }
+
+    // ====== Soil AI camera (Laptop JPEG) ======
+    function setSoilCamera(url) {
+      const img = document.getElementById('soilCam');
+      const status = document.getElementById('soilCamStatus');
+      if (!url) return;
+
+      img.src = url + "?t=" + Date.now(); // cache bust so it updates
+
+      img.onerror = () => status.textContent = 'Camera not reachable';
+      img.onload = () => status.textContent = 'Live';
+    }
+
+    // ====== Soil AI JSON ======
+    function formatTime(ts) {
+      if (!ts) return "--";
+      return new Date(ts * 1000).toLocaleTimeString();
+    }
+
+    async function fetchSoilAI() {
+      const pill = document.getElementById("soilStatus");
+      try {
+        const res = await fetch(SOIL_URL, { cache: "no-store" });
+        const d = await res.json();
+
+        document.getElementById("soilLabel").textContent = (d.label || "--").toUpperCase();
+        document.getElementById("soilConf").textContent =
+          (d.conf !== undefined && d.conf !== null) ? Number(d.conf).toFixed(2) : "--";
+        document.getElementById("soilTime").textContent = formatTime(d.timestamp);
+        document.getElementById("soilSource").textContent = SOIL_URL;
+
+        if (d.label && d.label !== "--" && d.label !== "NO_CAMERA") {
+          pill.className = "statusPill ok";
+          pill.textContent = "Live";
+        } else {
+          pill.className = "statusPill warn";
+          pill.textContent = "Waiting...";
+        }
+      } catch (e) {
+        pill.className = "statusPill bad";
+        pill.textContent = "No soil server";
+        document.getElementById("soilSource").textContent = "--";
+      }
+    }
+
+    // ====== Arduino/base JSON ======
+    let pointIndex = 0;
+
+    async function fetchData() {
+      try {
+        const res = await fetch(ARDUINO_URL);
+        const data = await res.json();
+
+        document.getElementById('wifiInfo').textContent = 'Connected • ' + data.ip;
+
+        document.getElementById('mq2Value').textContent = data.mq2Analog;
+        document.getElementById('co2Value').textContent = data.co2;
+        document.getElementById('dhtTemp').textContent = data.dhtTemp ?? '--';
+        document.getElementById('dhtHum').textContent = data.dhtHum ?? '--';
+        document.getElementById('scdTemp').textContent = data.scdTemp ?? '--';
+        document.getElementById('scdHum').textContent = data.scdHum ?? '--';
+        document.getElementById('mq2Digital').textContent = data.mq2DigitalText;
+        document.getElementById('soilTempValue').textContent = data.dsTemp ?? '--';
+
+        const gasPercent = Math.min(100, Math.max(0, Math.round((data.mq2Analog / 1023) * 100)));
+        document.getElementById('gasPercent').textContent = gasPercent + '%';
+        updateGauge('gasGauge', gasPercent);
+
+        const soilMoisture = Math.floor(Math.random() * 41) + 40;
+        document.getElementById('soilPercent').textContent = soilMoisture + '%';
+        updateGauge('soilGauge', soilMoisture);
+
+        let ph = 7.0;
+        if (data.co2 > 0) {
+          ph = (7.5 - (data.co2 / 5000) * 1.5);
+          ph = Math.max(3.0, Math.min(9.0, ph));
+        }
+        document.getElementById('phValue').textContent = ph.toFixed(1);
+
+        const now = new Date();
+        const label = now.getHours() + ':' +
+          String(now.getMinutes()).padStart(2, '0') + ':' +
+          String(now.getSeconds()).padStart(2, '0');
+
+        pushData(mq2Chart, mq2Labels, mq2Data, label, data.mq2Analog);
+        pushData(co2Chart, co2Labels, co2Data, label, data.co2);
+
+        const soilValue = (data.dsTemp === null ? 25 : data.dsTemp);
+        pushScatterPoint(soilTempChart, soilTempPoints, pointIndex++, soilValue);
+
+        const center = soilValue;
+        soilTempChart.options.scales.y.min = center - 3;
+        soilTempChart.options.scales.y.max = center + 3;
+        soilTempChart.update();
+
+        const status = document.getElementById('gasStatus');
+        if (data.mq2Digital === 1) {
+          status.className = 'statusPill bad';
+          status.textContent = 'Gas threshold reached';
+        } else if (gasPercent > 60) {
+          status.className = 'statusPill warn';
+          status.textContent = 'Gas rising';
+        } else {
+          status.className = 'statusPill ok';
+          status.textContent = 'Normal';
+        }
+
+        // rover cam stays rover cam (ESP32)
+        setRoverCamera(ESP32_CAM_STREAM);
+
+      } catch (err) {
+        document.getElementById('wifiInfo').textContent = 'Disconnected';
+        document.getElementById('camStatus').textContent = 'Waiting for data';
+        console.error(err);
+      }
+    }
+  
+    // ====== Start everything ======
+    setRoverCamera(ESP32_CAM_STREAM);
+
+    fetchData();
+    setInterval(fetchData, 3000);
+
+    fetchSoilAI();
+    setInterval(fetchSoilAI, 500);
+
+    // Soil camera preview (laptop)
+    setSoilCamera(SOIL_FRAME_URL);
+    setInterval(() => setSoilCamera(SOIL_FRAME_URL), 200);
+  </script>
+</body>
+</html>
