@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 # CONFIG
-CLASS_NAME = "coarse"   # change to "medium" or "fine"
+CLASS_NAME = "fine"   # change to "medium" or "fine"
 NUM_FRAMES = 50
 IMG_SIZE = 300
 

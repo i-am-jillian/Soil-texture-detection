@@ -1,157 +1,117 @@
-import os, glob, csv, re, shutil
+import cv2
 import numpy as np
+import time
 from pathlib import Path
 
-RAW_DIR = Path("raw/14725633")          # <-- your folder
-OUT_IMG_DIR = Path("data/images")
-OUT_CSV = Path("data/labels.csv")
+CLASS_NAME = "coarse"   # change to "medium" or "fine"
+NUM_FRAMES = 50
+IMG_SIZE = 300
 
-# thresholds in mm (practical URC bins)
-def texture_from_d50(d50_mm: float) -> str:
-    if d50_mm < 0.06:
-        return "fine"
-    elif d50_mm < 0.6:
-        return "medium"
+CAPTURE_INTERVAL_SEC = 0.20  # 0.20 = 5 fps, 0.50 = 2 fps, 1.0 = 1 fps
+CAM_INDEX = 0                # try 1 or 2 if using Continuity Camera / iPhone
+
+SAVE_DIR = Path("data/images")
+NPY_DIR = Path("data")
+
+# If True, running again with same CLASS_NAME overwrites coarse_frames.npy and coarse_custom_*.jpg
+OVERWRITE = True
+
+
+def capture_frames():
+    cap = cv2.VideoCapture(CAM_INDEX)
+
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open camera index {CAM_INDEX}. Try CAM_INDEX=1 or 2.")
+
+    print("Press 's' to start capturing")
+    print("Press 'q' to quit")
+
+    frames = []
+    capturing = False
+    count = 0
+
+    last_capture_time = 0.0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            print("Failed to read frame from camera.")
+            break
+
+        display = frame.copy()
+
+        # Overlay info
+        cv2.putText(display, f"Class: {CLASS_NAME}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(display, f"Captured: {count}/{NUM_FRAMES}", (10, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        if capturing:
+            # green border while capturing
+            cv2.rectangle(display, (0, 0), (display.shape[1], display.shape[0]),
+                          (0, 255, 0), 10)
+
+            now = time.time()
+            if now - last_capture_time >= CAPTURE_INTERVAL_SEC:
+                resized = cv2.resize(frame, (IMG_SIZE, IMG_SIZE))
+                frames.append(resized)
+                count += 1
+                last_capture_time = now
+                print(f"Captured {count}/{NUM_FRAMES}")
+
+                if count >= NUM_FRAMES:
+                    break
+
+        cv2.imshow("Soil Capture", display)
+        key = cv2.waitKey(1) & 0xFF
+
+        #click the OpenCV window before pressing keys
+        if key == ord("s"):
+            capturing = True
+            last_capture_time = 0.0
+            print("Capturing started...")
+
+        if key == ord("q"):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+    return np.array(frames, dtype=np.uint8)
+
+
+def save_data(frames: np.ndarray):
+    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    NPY_DIR.mkdir(parents=True, exist_ok=True)
+
+    if frames.shape[0] == 0:
+        print("No frames captured; nothing to save.")
+        return
+
+    # Save numpy array
+    if OVERWRITE:
+        npy_path = NPY_DIR / f"{CLASS_NAME}_frames.npy"
     else:
-        return "coarse"
+        ts = int(time.time())
+        npy_path = NPY_DIR / f"{CLASS_NAME}_frames_{ts}.npy"
 
-def detect_columns(fieldnames):
-    lower = [c.lower().strip() for c in fieldnames]
-    # diameter column candidates
-    diam_candidates = ["diam", "diameter", "d", "size", "particle_size", "particle size", "x"]
-    finer_candidates = ["finer", "percent_finer", "percent finer", "finer(%)", "cumulative", "cum", "y"]
+    np.save(npy_path, frames)
+    print(f"Saved numpy array to {npy_path}")
+    print("Array shape:", frames.shape)  # (50, 300, 300, 3)
 
-    def find_any(cands):
-        for cand in cands:
-            for i, name in enumerate(lower):
-                if cand == name:
-                    return fieldnames[i]
-        # fallback: substring match
-        for cand in cands:
-            for i, name in enumerate(lower):
-                if cand in name:
-                    return fieldnames[i]
-        return None
+    # Save images for your existing training pipeline
+    for i, img in enumerate(frames):
+        if OVERWRITE:
+            filename = SAVE_DIR / f"{CLASS_NAME}_custom_{i}.jpg"
+        else:
+            ts = int(time.time())
+            filename = SAVE_DIR / f"{CLASS_NAME}_{ts}_{i}.jpg"
 
-    diam_col = find_any(diam_candidates)
-    finer_col = find_any(finer_candidates)
+        cv2.imwrite(str(filename), img)
 
-    return diam_col, finer_col
+    print(f"Saved {len(frames)} images to {SAVE_DIR}")
 
-def load_psd(csv_path: Path):
-    with open(csv_path, "r", newline="") as f:
-        reader = csv.DictReader(f)
-        if not reader.fieldnames:
-            raise ValueError(f"No header in {csv_path}")
-        diam_col, finer_col = detect_columns(reader.fieldnames)
-        if diam_col is None or finer_col is None:
-            raise ValueError(f"Could not detect diam/finer columns in {csv_path.name}. Columns: {reader.fieldnames}")
-
-        diam = []
-        finer = []
-        for r in reader:
-            try:
-                diam.append(float(str(r[diam_col]).strip()))
-                finer.append(float(str(r[finer_col]).strip()))
-            except:
-                continue
-
-    if len(diam) < 3:
-        raise ValueError(f"Not enough numeric rows in {csv_path.name}")
-
-    diam = np.array(diam, dtype=float)
-    finer = np.array(finer, dtype=float)
-
-    order = np.argsort(diam)
-    diam = diam[order]
-    finer = finer[order]
-    return diam, finer
-
-def d_at_percent(diam, finer, p=50.0):
-    # interpolate diameter where cumulative percent finer crosses p
-    # make monotonic safer:
-    # if finer isn't increasing, sort by finer too (rare)
-    if np.any(np.diff(finer) < 0):
-        order = np.argsort(finer)
-        finer = finer[order]
-        diam = diam[order]
-
-    p = float(p)
-    if p <= float(finer.min()):
-        return float(diam[np.argmin(finer)])
-    if p >= float(finer.max()):
-        return float(diam[np.argmax(finer)])
-    return float(np.interp(p, finer, diam))
-
-def extract_sample_ids_from_csvs(psd_csvs):
-    sample_to_label = {}
-    for p in psd_csvs:
-        sample_id = Path(p).stem  # e.g. F827
-        try:
-            diam, finer = load_psd(Path(p))
-            d50 = d_at_percent(diam, finer, 50.0)
-            sample_to_label[sample_id] = texture_from_d50(d50)
-        except Exception as e:
-            # skip bad csvs (but print so you know)
-            print(f"[skip csv] {p} -> {e}")
-    return sample_to_label
-
-def find_sample_in_filename(filename, sample_ids):
-    # match whole token like F827, not random substring
-    # common pattern: F### or S### etc — we also try direct membership
-    base = Path(filename).stem
-    for sid in sample_ids:
-        if re.search(rf"\b{re.escape(sid)}\b", base):
-            return sid
-    # fallback: substring match
-    for sid in sample_ids:
-        if sid in base:
-            return sid
-    return None
-
-def main():
-    OUT_IMG_DIR.mkdir(parents=True, exist_ok=True)
-    OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
-
-    psd_csvs = glob.glob(str(RAW_DIR / "**" / "*.csv"), recursive=True)
-    if not psd_csvs:
-        raise SystemExit(f"No CSV files found under {RAW_DIR}")
-
-    # images are inside All_photos (your case), but we search recursively anyway
-    imgs = []
-    for ext in ("*.jpg", "*.JPG", "*.jpeg", "*.JPEG", "*.png", "*.PNG"):
-        imgs += glob.glob(str(RAW_DIR / "**" / ext), recursive=True)
-    if not imgs:
-        raise SystemExit(f"No images found under {RAW_DIR}")
-
-    sample_to_label = extract_sample_ids_from_csvs(psd_csvs)
-    if not sample_to_label:
-        raise SystemExit("No valid PSD CSVs parsed. Check CSV headers/format.")
-
-    sample_ids = list(sample_to_label.keys())
-
-    rows = []
-    copied = 0
-    for img in imgs:
-        sid = find_sample_in_filename(img, sample_ids)
-        if not sid:
-            continue
-        label = sample_to_label[sid]
-        dst = OUT_IMG_DIR / Path(img).name
-        shutil.copy2(img, dst)
-        rows.append((str(dst).replace("\\", "/"), label))
-        copied += 1
-
-    if copied == 0:
-        raise SystemExit("Matched 0 images to CSV sample IDs. Filenames may not include sample IDs; we can fix matching.")
-
-    with open(OUT_CSV, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["filepath", "label"])
-        w.writerows(rows)
-
-    print(f"✅ Wrote {len(rows)} labeled images to {OUT_CSV}")
-    print(f"✅ Copied images into {OUT_IMG_DIR}")
 
 if __name__ == "__main__":
-    main()
+    frames = capture_frames()
+    save_data(frames)
